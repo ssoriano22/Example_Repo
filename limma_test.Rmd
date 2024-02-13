@@ -1,0 +1,96 @@
+---
+title: "Limma_Test"
+author: "Sophia Soriano"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(dplyr)
+library(limma)
+library(edgeR)
+library(readr)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+```
+
+## Linear Models for Microarray Data (LIMMA)
+
+Tutorials:
+
+https://blog.devgenius.io/differential-gene-expression-analysis-using-limma-step-by-step-358da9d41c4e
+https://bioconductor.org/packages/release/workflows/vignettes/RNAseq123/inst/doc/designmatrices.html
+https://medium.com/biosyntax/using-limma-to-find-differentially-expressed-genes-1c12c905e3b1
+https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html
+
+```{r}
+#Load example data - Seer murine KMC-PDAC v. KMC Control - WAIT ON RAW INTENSITY DATA for example
+seer_KMC_df = read_tsv("~/Code/SomaLogic/Seer_MUS_proteins_KMC_50%Sparsity.tsv")
+#Keep necessary columns - raw data recommended for limma
+sub_seer_KMC_df = seer_KMC_df %>% dplyr::select(c("Feature","Replicate","SampleName","Group_final","Protein.Ids","Protein.Names","First.Protein.Description","PG.MaxLFQ"))
+```
+
+```{r}
+#Transform df to wide format for limma - one row for each feature_gene, columns for each sample
+seer_limma_input = sub_seer_KMC_df %>% mutate(Feature_ProtNames = paste(Feature,Protein.Names,sep = "_"),
+                                              Group_final = ifelse(Group_final == "KMC - PDAC",
+                                                                   "KMC_PDAC",
+                                                                   "KMC_CTRL"),
+                                              Group_SampleName = paste(Group_final,SampleName,sep = "_")) %>%
+                                        dplyr::select(c("Feature_ProtNames","PG.MaxLFQ","Group_SampleName")) %>%
+                                        pivot_wider(names_from = Group_SampleName,
+                                                    values_from = PG.MaxLFQ) %>%
+                                        replace(is.na(.), 0)
+                                        
+                                      
+#Convert raw data to DEGList object
+seer_DGElist = DGEList(seer_limma_input)
+
+#Calculate normalization factors
+seer_DGElist_norm = calcNormFactors(seer_DGElist)
+
+snames = colnames(seer_limma_input)[2:19] #Sample names
+snames
+
+#Create annotations
+group = substr(snames, 1, 8) 
+sample = substr(snames, 10, nchar(snames))
+
+# Re-combines sample and group strings - not accurate...
+# condition = interaction(group,sample)
+# condition
+
+#Plot MDS
+plotMDS(seer_DGElist_norm,col = as.numeric(snames))
+
+#Specify model matrix
+mm = model.matrix(~0 + snames)
+
+#Voom
+voom_res = limma::voom(seer_DGElist_norm, mm, plot = TRUE)
+voom_res
+
+#Create design matrix
+# design = model.matrix(~ 0+factor(c(1,1,2,2)))
+# #Assign column names
+# colnames(design) = c("KMC_PDAC", "KMC_control")
+# #Create contrast matrix
+# cont_matrix = makeContrasts(KMCvsCtrl = KMC_PDAC-KMC_control, levels=design)
+# 
+# #Fit the expression matrix to a linear model
+# l_model = lmFit(seer_limma_input, design)
+# #Compute contrast
+# fit_contrast = contrasts.fit(l_model, cont_matrix)
+# #Bayes statistics of differential expression *There are several options to tweak!*
+# fit_contrast = eBayes(fit_contrast)
+# #Generate a vocalno plot to visualize differential expression
+# volcanoplot(fit_contrast)
+# #Generate a list of top 100 differentially expressed genes
+# top_genes = topTable(fit_contrast, number = 100, adjust = "BH")
+# #Summary of results (number of differentially expressed genes)
+# result = decideTests(fit_contrast)
+# summary(result)
+```
